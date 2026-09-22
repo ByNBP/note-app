@@ -1,0 +1,11 @@
+name = "ortak-notlar-relay"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# Tarayiciyi ilgilendirir: yalnizca bu kokenlerden gelen fetch'e izin verilir.
+# Android istemcisi CORS'a tabi degildir.
+[vars]
+ALLOWED_ORIGINS = "https://note-app-a3675.web.app,https://note-app-a3675.firebaseapp.com,http://localhost:5000"
+
+# Servis hesabi anahtari koda girmez, secret olarak saklanir:
+#   npx wrangler secret put FIREBASE_SERVICE_ACCOUNT

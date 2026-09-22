@@ -1,0 +1,125 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    // ---------------------------------------------------------------
+    // users/{userId} -- profil + FCM token listesi
+    // ---------------------------------------------------------------
+    match /users/{userId} {
+      // Oturum uyelerinin isimlerini gosterebilmek icin okuma serbest.
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && uid() == userId;
+      // Hesabini silen kullanici profil dokumanini da temizleyebilsin;
+      // baskasininkine dokunamaz.
+      allow delete: if isSignedIn() && uid() == userId;
+    }
+
+    // ---------------------------------------------------------------
+    // joinCodes/{code} -- kod ile oturum bulma tablosu
+    // Oturumun kendisini okuyamayan bir kullanicinin koddan sessionId'ye
+    // ulasabilmesi icin ayri bir koleksiyonda tutuluyor.
+    // ---------------------------------------------------------------
+    match /joinCodes/{code} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.ownerId == uid();
+      allow update, delete: if isSignedIn() && resource.data.ownerId == uid();
+    }
+
+    // ---------------------------------------------------------------
+    // sessions/{sessionId}
+    // ---------------------------------------------------------------
+    match /sessions/{sessionId} {
+
+      function isMember() {
+        return isSignedIn() && uid() in resource.data.memberIds;
+      }
+
+      function isOwner() {
+        return isSignedIn() && resource.data.ownerId == uid();
+      }
+
+      // Kullanici kendini uye listesine ekliyor (katilma), baska hicbir
+      // alana dokunmuyor.
+      function isJoining() {
+        return isSignedIn()
+          && !(uid() in resource.data.memberIds)
+          && request.resource.data.memberIds == resource.data.memberIds.concat([uid()])
+          && request.resource.data.ownerId == resource.data.ownerId
+          && request.resource.data.title == resource.data.title
+          && request.resource.data.joinCode == resource.data.joinCode;
+      }
+
+      // Kullanici kendini uye listesinden cikariyor (ayrilma).
+      function isLeaving() {
+        return isMember()
+          && !(uid() in request.resource.data.memberIds)
+          && request.resource.data.ownerId == resource.data.ownerId
+          && request.resource.data.title == resource.data.title
+          && request.resource.data.joinCode == resource.data.joinCode;
+      }
+
+      // `resource == null` olmayan dokuman demek: okunacak veri yok, bu yuzden
+      // sizdiracak bir sey de yok. Bu izin olmadan silinmis bir oturumu
+      // okumaya calismak permission-denied donuyor ve uygulama "erisim yok"
+      // diyor -- oysa dogru mesaj "oturum artik yok".
+      allow read: if isSignedIn() && (resource == null || isMember());
+
+      allow create: if isSignedIn()
+        && request.resource.data.ownerId == uid()
+        && request.resource.data.memberIds == [uid()];
+
+      // Uyeler yalnizca kendi gorunen isimlerini ve updatedAt'i tazeleyebilir;
+      // baslik, kod, sahiplik ve uye listesi sahibe ait.
+      function isMemberTouch() {
+        return isMember()
+          && request.resource.data.memberIds == resource.data.memberIds
+          && request.resource.data.ownerId == resource.data.ownerId
+          && request.resource.data.title == resource.data.title
+          && request.resource.data.joinCode == resource.data.joinCode;
+      }
+
+      allow update: if isOwner() || isJoining() || isLeaving() || isMemberTouch();
+
+      allow delete: if isOwner();
+
+      // -------------------------------------------------------------
+      // sessions/{sessionId}/notes/{noteId}
+      // -------------------------------------------------------------
+      match /notes/{noteId} {
+
+        function session() {
+          return get(/databases/$(database)/documents/sessions/$(sessionId)).data;
+        }
+
+        function inSession() {
+          return isSignedIn() && uid() in session().memberIds;
+        }
+
+        allow read: if inSession();
+
+        allow create: if inSession()
+          && request.resource.data.authorId == uid()
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 2000;
+
+        // Oturumdaki herkes notu isaretleyebilir / duzenleyebilir.
+        allow update: if inSession()
+          && request.resource.data.authorId == resource.data.authorId;
+
+        // Silme: notu yazan kisi veya oturum sahibi.
+        allow delete: if inSession()
+          && (resource.data.authorId == uid() || session().ownerId == uid());
+      }
+    }
+  }
+}

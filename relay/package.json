@@ -1,0 +1,15 @@
+{
+  "name": "ortak-notlar-relay",
+  "description": "Yeni not eklendiginde oturum uyelerine FCM bildirimi gonderen Cloudflare Worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "secret": "wrangler secret put FIREBASE_SERVICE_ACCOUNT",
+    "logs": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
