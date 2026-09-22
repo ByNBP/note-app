@@ -1,0 +1,102 @@
+# iOS derlemesi.
+#
+# Apple'in arac zinciri yalnizca macOS'ta calistigi icin bu is bir macOS
+# kosucusunda doner. Derleme **imzasiz**: Apple Developer Program uyeligi ve
+# sertifika gerektirmez, yani ciktisi gercek bir cihaza kurulamaz. Amaci
+# kodun iOS'ta derlendigini dogrulamak ve imzalanmaya hazir bir paket uretmek.
+#
+# Imzali .ipa'ya gecmek icin dosyanin sonundaki nota bak.
+
+name: iOS build
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'relay/**'
+      - 'functions/**'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Imzasiz iOS derlemesi
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Depoyu al
+        uses: actions/checkout@v4
+
+      - name: Flutter kur
+        uses: subosito/flutter-action@v2
+        with:
+          # Yerelde kullanilan surum; CI'nin bir gun sessizce baska bir
+          # surume kaymasi icin sabitlenmis durumda.
+          flutter-version: 3.47.5
+          channel: stable
+          cache: true
+
+      - name: Ortami yaz
+        run: |
+          flutter --version
+          xcodebuild -version
+
+      - name: Bagimliliklar
+        run: flutter pub get
+
+      # CocoaPods spec deposu indirmesi derlemenin en yavas parcasi; eklenti
+      # surumleri pubspec.lock'a bagli oldugu icin anahtar ondan uretiliyor.
+      - name: CocoaPods onbellegi
+        uses: actions/cache@v4
+        with:
+          path: ~/.cocoapods
+          key: cocoapods-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: cocoapods-${{ runner.os }}-
+
+      - name: Analiz
+        run: flutter analyze
+
+      - name: Testler
+        # integration_test/ gercek cihaz ister, burada calistirilmiyor.
+        run: flutter test
+
+      - name: iOS derlemesi (imzasiz)
+        run: flutter build ios --release --no-codesign --build-number=${{ github.run_number }}
+
+      # flutter build ipa imzalama ister; imzasiz bir paket icin Runner.app'i
+      # Apple'in bekledigi Payload/ duzenine koyup sikistiriyoruz. Ortaya cikan
+      # .ipa kurulabilir degildir -- gecerli bir sertifikayla imzalandiktan
+      # sonra kurulabilir hale gelir.
+      - name: Imzasiz .ipa paketle
+        run: |
+          cd build/ios/iphoneos
+          mkdir -p Payload
+          cp -R Runner.app Payload/
+          zip -qry "$GITHUB_WORKSPACE/OrtakNotlar-unsigned.ipa" Payload
+          ls -lh "$GITHUB_WORKSPACE/OrtakNotlar-unsigned.ipa"
+
+      - name: Paketi yukle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-unsigned-${{ github.run_number }}
+          path: OrtakNotlar-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+# ---------------------------------------------------------------------------
+# Imzali .ipa'ya gecerken
+#
+# Gerekenler: Apple Developer Program uyeligi, bir dagitim sertifikasi (.p12)
+# ve provisioning profile. Ikisini de base64'e cevirip depo secret'i olarak
+# sakla (Settings > Secrets and variables > Actions), sonra bu is akisina
+# apple-actions/import-codesign-certs adimini ekleyip son iki adimi
+#
+#   flutter build ipa --export-options-plist=ios/ExportOptions.plist
+#
+# ile degistir. Bu asamada ios/Runner/GoogleService-Info.plist ve
+# lib/firebase_options.dart icindeki iOS degerleri de doldurulmus olmali,
+# yoksa uygulama acilista kurulum ekranini gosterir.
+# ---------------------------------------------------------------------------
